@@ -61,7 +61,7 @@
     font-weight:700; font-size:13px; border:1px solid var(--gold);
   }
   .asset-chip{
-    display:inline-block; font-size:11px; font-weight:600; padding:2px 8px; border-radius99px;
+    display:inline-block; font-size:11px; font-weight:600; padding:2px 8px; border-radius:99px;
     border:1px solid var(--line); color: var(--ink-dim);
   }
   .fade-in{ animation: fadeIn .35s ease both; }
@@ -297,7 +297,7 @@
     </div>
   </section>
 
-  <!-- TAB 3: STOCK MASTER (수정됨) -->
+  <!-- TAB 3: STOCK MASTER -->
   <section id="tab-stocks" class="hidden fade-in">
     <div class="card p-5 mb-6">
       <p class="text-[13px] font-semibold mb-3 text-[var(--ink-dim)]">종목 기준정보 등록</p>
@@ -489,15 +489,22 @@
   <section id="tab-backup" class="hidden fade-in">
     <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
       <div class="card p-6">
-        <p class="text-[15px] font-semibold mb-2 gold-text">데이터 백업 내보내기</p>
-        <p class="text-[13px] text-[var(--ink-dim)] mb-4">로컬 스토리지 원장 데이터를 물리 파일(JSON)로 내보내 보관합니다.</p>
-        <button id="export-btn" class="btn-gold">JSON 원장 파일 다운로드</button>
+        <p class="text-[15px] font-semibold mb-2 gold-text">데이터 백업 내보내기 및 Firebase 클라우드 저장</p>
+        <p class="text-[13px] text-[var(--ink-dim)] mb-4">로컬 스토리지 원장 데이터를 물리 파일(JSON)로 다운로드하거나 Firebase 클라우드 DB에 동기화합니다.</p>
+        <div class="flex flex-wrap gap-3">
+          <button id="export-btn" class="btn-gold">JSON 원장 파일 다운로드</button>
+          <button id="firebase-save-btn" class="btn-gold !bg-amber-600 hover:!bg-amber-500 !text-white">Firebase에 저장</button>
+        </div>
+        <p id="firebase-save-msg" class="text-[12px] mt-2 hidden"></p>
       </div>
       <div class="card p-6">
-        <p class="text-[15px] font-semibold mb-2 gold-text">데이터 복구 가져오기</p>
-        <p class="text-[13px] text-[var(--ink-dim)] mb-4">이전에 내보낸 JSON 백업 파일을 업로드하여 내부 원장을 강제 복구 마이그레이션합니다.</p>
+        <p class="text-[15px] font-semibold mb-2 gold-text">데이터 복구 가져오기 및 Firebase 불러오기</p>
+        <p class="text-[13px] text-[var(--ink-dim)] mb-4">이전에 내보낸 JSON 백업 파일을 업로드하거나 Firebase 클라우드에서 데이터를 불러옵니다.</p>
         <input type="file" id="import-file" accept="application/json" class="mb-3 w-full">
-        <button id="import-btn" class="btn-ghost w-full">데이터 원본 병합 및 복구</button>
+        <div class="flex flex-wrap gap-3">
+          <button id="import-btn" class="btn-ghost flex-1">파일에서 복구</button>
+          <button id="firebase-load-btn" class="btn-ghost flex-1 !border-amber-600 !text-amber-400">Firebase에서 불러오기</button>
+        </div>
         <p id="import-msg" class="text-[12px] mt-2 hidden"></p>
       </div>
     </div>
@@ -555,7 +562,26 @@
 <!-- Toast -->
 <div id="toast" class="toast-container">변경사항이 저장되었습니다.</div>
 
-<script>
+<!-- FIREBASE SDK & APP LOGIC -->
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getAnalytics } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-analytics.js";
+import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyCuksqN08CgrkjsCNng1Fa17XBBi9Zf5yo",
+  authDomain: "asset-manage-46c63.firebaseapp.com",
+  projectId: "asset-manage-46c63",
+  storageBucket: "asset-manage-46c63.firebasestorage.app",
+  messagingSenderId: "591467335270",
+  appId: "1:591467335270:web:630a98a56386d56dd927a7",
+  measurementId: "G-3SBM1616HB"
+};
+
+const app = initializeApp(firebaseConfig);
+const analytics = getAnalytics(app);
+const db = getFirestore(app);
+
 /* ---------------------------------------------------------
    STORAGE KEYS & STATE MANAGEMENT
 --------------------------------------------------------- */
@@ -576,7 +602,6 @@ let stocks   = loadJSON(LS_STOCKS, []);
 
 let currentPriceMap = loadJSON('fam_current_prices_v2_map', {});
 
-// stock 변경 감지를 위한 더티 트래커 (UI 변경사항)
 let stockClassDirty = false;
 
 function loadJSON(key, fallback){
@@ -765,22 +790,20 @@ document.getElementById('tabNav').addEventListener('click', (e) => {
   const btn = e.target.closest('.tab-btn');
   if (!btn) return;
   const targetTab = btn.dataset.tab;
-  // stocks 탭에서 변경사항이 있을 경우 확인
   if (targetTab !== 'stocks' && stockClassDirty) {
     if (!confirm('저장하지 않은 변경사항이 있습니다. 저장하시겠습니까?')) {
-      // 취소: 탭 이동 중단
       if (confirm('변경사항을 폐기하고 이동하시겠습니까?')) {
         stockClassDirty = false;
         switchTab(targetTab);
       }
       return;
     } else {
-      // 저장 실행
       saveStockClassChanges();
     }
   }
   switchTab(targetTab);
 });
+
 function switchTab(name){
   tabNames.forEach(t => {
     document.getElementById('tab-' + t).classList.toggle('hidden', t !== name);
@@ -973,7 +996,7 @@ function showAssetClassDetail(cls, intercourseHoldings, totalEval){
             const pct = totalEval > 0 ? (h.evalAmount / totalEval * 100) : 0;
             const roiColor = h.roi >= 0 ? 'var(--profit)' : 'var(--loss)';
             return `
-              <tr class="clickable-row" onclick="openStockDetailModal('${h.owner}','${h.account}','${h.name}')">
+              <tr class="clickable-row" data-owner="${h.owner}" data-account="${h.account}" data-name="${escapeHtml(h.name)}">
                 <td class="font-medium hover:underline text-[var(--gold-soft)]">${escapeHtml(h.name)} <span class="text-[11px] text-[var(--ink-dim)]">(${h.owner})</span></td>
                 <td class="mono text-right">${fmtWon(h.evalAmount)}</td>
                 <td class="mono text-right">${pct.toFixed(1)}%</td>
@@ -986,6 +1009,12 @@ function showAssetClassDetail(cls, intercourseHoldings, totalEval){
     </div>
   `;
   content.innerHTML = tableHTML;
+  
+  content.querySelectorAll('.clickable-row').forEach(row => {
+    row.addEventListener('click', () => {
+      openStockDetailModal(row.dataset.owner, row.dataset.account, row.dataset.name);
+    });
+  });
 }
 
 function renderHoldingsTable(holdings, totalBuy){
@@ -1245,7 +1274,7 @@ document.getElementById('modal-close-btn').addEventListener('click', () => {
 });
 
 /* ---------------------------------------------------------
-   TAB 3: STOCKS MASTER (수정됨)
+   TAB 3: STOCKS MASTER
 --------------------------------------------------------- */
 document.getElementById('stock-form').addEventListener('submit', (e) => {
   e.preventDefault();
@@ -1263,13 +1292,11 @@ document.getElementById('stock-form').addEventListener('submit', (e) => {
   populateTradeStockSelect();
 });
 
-// 변경내용 저장 버튼
 document.getElementById('save-stock-classes-btn').addEventListener('click', () => {
   saveStockClassChanges();
 });
 
 function saveStockClassChanges() {
-  // stocks-table 내 select 값 수집
   const rows = document.querySelectorAll('#stocks-table tr');
   let changed = false;
   rows.forEach(row => {
@@ -1287,8 +1314,7 @@ function saveStockClassChanges() {
     saveAll();
     stockClassDirty = false;
     showToast('변경사항이 저장되었습니다.');
-    renderStocks(); // select 값 유지
-    // 모든 화면 갱신
+    renderStocks();
     renderDashboard();
     renderRealizedStats();
     renderTrades();
@@ -1311,7 +1337,6 @@ function renderStocks(){
   const sorted = [...stocks].sort((a,b) => a.name.localeCompare(b.name));
   sorted.forEach(s => {
     const tr = document.createElement('tr');
-    // select 옵션 생성
     const selectHtml = `<select class="stock-class-select bg-[#0e1218] border border-[var(--line)] rounded px-2 py-1 text-sm" data-name="${escapeHtml(s.name)}">
       ${ASSET_CLASSES.map(cls => `<option value="${cls}" ${cls === s.assetClass ? 'selected' : ''}>${cls}</option>`).join('')}
     </select>`;
@@ -1323,7 +1348,6 @@ function renderStocks(){
     tbody.appendChild(tr);
   });
 
-  // dirty 플래그 변경 감지
   tbody.querySelectorAll('.stock-class-select').forEach(sel => {
     sel.addEventListener('change', () => {
       stockClassDirty = true;
@@ -1519,7 +1543,7 @@ function renderTrades(){
       <td class="mono text-xs">${t.date}</td>
       <td>${t.owner}</td>
       <td>${accountShort(t.account)}</td>
-      <td class="font-medium text-[var(--gold-soft)] clickable-row hover:underline" onclick="openStockDetailModal('${t.owner}','${t.account}','${t.name}')">${escapeHtml(t.name)}</td>
+      <td class="font-medium text-[var(--gold-soft)] clickable-row hover:underline" data-owner="${t.owner}" data-account="${t.account}" data-name="${escapeHtml(t.name)}">${escapeHtml(t.name)}</td>
       <td><span class="asset-chip">${escapeHtml(stockAssetClass(t.name))}</span></td>
       <td style="color:${actionColor}; font-weight:600;">${t.action}</td>
       <td class="mono">${fmtNum(t.qty)}</td>
@@ -1531,6 +1555,12 @@ function renderTrades(){
       <td><button class="text-[11px] text-[var(--ink-dim)] hover:text-[var(--loss)]" data-del="${t.id}">삭제</button></td>
     `;
     tbody.appendChild(tr);
+  });
+
+  tbody.querySelectorAll('.clickable-row').forEach(row => {
+    row.addEventListener('click', () => {
+      openStockDetailModal(row.dataset.owner, row.dataset.account, row.dataset.name);
+    });
   });
 
   tbody.querySelectorAll('[data-del]').forEach(btn => {
@@ -1740,7 +1770,7 @@ function renderRebalanceGuide(){
 }
 
 /* ---------------------------------------------------------
-   TAB 7: BACKUP
+   TAB 7: BACKUP & FIREBASE BACKUP INTEGRATION
 --------------------------------------------------------- */
 document.getElementById('export-btn').addEventListener('click', () => {
   const payload = { 
@@ -1755,6 +1785,72 @@ document.getElementById('export-btn').addEventListener('click', () => {
   a.download = `family_portfolio_hts_backup_${new Date().toISOString().slice(0,10)}.json`;
   a.click();
   URL.revokeObjectURL(url);
+});
+
+// Firebase 저장 (07. 백업 복구 탭 -> Firebase 저장)
+document.getElementById('firebase-save-btn').addEventListener('click', async () => {
+  const msg = document.getElementById('firebase-save-msg');
+  msg.textContent = 'Firebase 저장 중...';
+  msg.style.color = 'var(--gold-soft)';
+  msg.classList.remove('hidden');
+
+  try {
+    const payload = { 
+      accounts, trades, prices, assetTargets, stocks, currentPriceMap,
+      v: "HTS_PRO_V2",
+      updatedAt: new Date().toISOString() 
+    };
+
+    // 'portfolio' 컬렉션의 'family_ledger' 문서에 저장
+    await setDoc(doc(db, "portfolio", "family_ledger"), payload);
+    
+    msg.textContent = '✅ Firebase 저장 완료되었습니다.';
+    msg.style.color = 'var(--profit)';
+    showToast('Firebase 저장 완료!');
+  } catch (err) {
+    console.error("Firebase save error:", err);
+    msg.textContent = '❌ 저장 실패: ' + err.message;
+    msg.style.color = 'var(--loss)';
+  }
+});
+
+// Firebase 불러오기
+document.getElementById('firebase-load-btn').addEventListener('click', async () => {
+  const msg = document.getElementById('import-msg');
+  msg.textContent = 'Firebase 데이터를 로딩하는 중...';
+  msg.style.color = 'var(--gold-soft)';
+  msg.classList.remove('hidden');
+
+  try {
+    const docRef = doc(db, "portfolio", "family_ledger");
+    const docSnap = await getDoc(docRef);
+
+    if (docSnap.exists()) {
+      const data = docSnap.data();
+      if (!confirm('Firebase에 저장된 클라우드 데이터로 현재 원장을 덮어쓰시겠습니까?')) return;
+
+      accounts = Array.isArray(data.accounts) ? data.accounts : [];
+      trades = Array.isArray(data.trades) ? data.trades : [];
+      prices = data.prices || {};
+      assetTargets = data.assetTargets || {};
+      stocks = Array.isArray(data.stocks) ? data.stocks : [];
+      currentPriceMap = data.currentPriceMap || {};
+
+      saveAll();
+      msg.textContent = '✅ Firebase 원장 불러오기가 성공적으로 완료되었습니다.';
+      msg.style.color = 'var(--profit)';
+      
+      executeDataMigration();
+      switchTab('dashboard');
+    } else {
+      msg.textContent = '❌ Firebase에 저장된 데이터가 없습니다.';
+      msg.style.color = 'var(--loss)';
+    }
+  } catch (err) {
+    console.error("Firebase load error:", err);
+    msg.textContent = '❌ 불러오기 실패: ' + err.message;
+    msg.style.color = 'var(--loss)';
+  }
 });
 
 document.getElementById('import-btn').addEventListener('click', () => {
