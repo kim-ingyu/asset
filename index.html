@@ -165,10 +165,15 @@
 
     <!-- V3 : 첫 화면 핵심 지표 -->
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-4">
-      <div class="card p-3 sm:p-4"><p class="text-[10px] sm:text-[11px] text-[var(--ink-dim)] mb-1">총 순자산 (평가+예수금)</p><p class="text-sm sm:text-xl font-bold mono gold-text truncate" id="x-net">0원</p></div>
+      <div class="card p-3 sm:p-4"><p class="text-[10px] sm:text-[11px] text-[var(--ink-dim)] mb-1">총 순자산 (평가+예수금)</p><p class="text-sm sm:text-xl font-bold mono gold-text truncate" id="x-net">0원</p><p class="text-[10px] text-[var(--ink-dim)] truncate" id="x-net-sub">-</p></div>
       <div class="card p-3 sm:p-4"><p class="text-[10px] sm:text-[11px] text-[var(--ink-dim)] mb-1">총 투입금액 (입금-출금)</p><p class="text-sm sm:text-xl font-bold mono truncate" id="x-invested">0원</p></div>
       <div class="card p-3 sm:p-4"><p class="text-[10px] sm:text-[11px] text-[var(--ink-dim)] mb-1">투입 대비 손익</p><p class="text-sm sm:text-xl font-bold mono truncate" id="x-pl">0원</p><p class="text-[10px] mono truncate" id="x-pl-pct">-</p></div>
       <div class="card p-3 sm:p-4"><p class="text-[10px] sm:text-[11px] text-[var(--ink-dim)] mb-1">배당·분배금</p><p class="text-sm sm:text-xl font-bold mono truncate" id="x-dist">0원</p><p class="text-[10px] text-[var(--ink-dim)] mono truncate" id="x-sub">-</p></div>
+    </div>
+    <div class="card p-4 sm:p-5 mb-4 sm:mb-6">
+      <p class="text-[12px] sm:text-[13px] font-semibold mb-1 text-[var(--ink-dim)]">총 순자산 구성 (사람별 · 계좌별)</p>
+      <p class="text-[10px] sm:text-[11px] text-[var(--ink-dim)] mb-3">총 순자산 = 투자자산 평가금액 + 예수금. 예수금은 업로드한 거래내역(입출금·거래·분배금·이용료) 누적 기준이며, 업로드 이력이 없는 계좌는 ‘미확인’(0원 반영, 추정하지 않음)입니다.</p>
+      <table><thead><tr><th>구분</th><th>평가금액</th><th>예수금</th><th>총 순자산</th></tr></thead><tbody id="net-table"></tbody></table>
     </div>
     <div class="card p-4 sm:p-5 mb-4 sm:mb-6">
       <p class="text-[12px] sm:text-[13px] font-semibold mb-3 text-[var(--ink-dim)]">목표 비중 대비 현황 (세로선 = 목표 · 참고용)</p>
@@ -899,6 +904,7 @@ function renderDashboard(){
   renderAssetClassTable(filteredHoldings, totalBuy);
   renderExtra(filteredHoldings, totalEval, ownerF, accF);
   renderConsolidated(filteredHoldings);
+  resetDetailPanel();
 }
 
 function setProfitLossStyle(el, val, text){
@@ -912,10 +918,12 @@ function renderAccountPerformanceTable(allHoldings){
   const tbody = document.getElementById('account-performance-table');
   tbody.innerHTML = '';
   
-  const accTypes = ['연금저축', 'ISA', '종합매매'];
+  const _o = document.getElementById('f-owner').value, _a = document.getElementById('f-account').value;
+  if (_o !== 'all') allHoldings = allHoldings.filter(h => h.owner === _o);
+  const accTypes = ['연금저축', 'ISA', '종합매매'].filter(x => _a === 'all' || x === _a);
   
   accTypes.forEach(type => {
-    const accTrades = trades.filter(t => t.account === type);
+    const accTrades = trades.filter(t => t.account === type && (_o === 'all' || t.owner === _o));
     const accHoldings = allHoldings.filter(h => h.account === type);
     
     const buyAmt = accHoldings.reduce((s, h) => s + h.remainingCost, 0);
@@ -1974,6 +1982,41 @@ function cashSummary(ownerF, accF){
   return s;
 }
 
+/* ---- 총 순자산 = 평가금액 + 예수금 (소유자·계좌 필터 범위 공통, 저장 데이터 변경 없음) ---- */
+const OWNERS_UI = ['김인규', '김혜영'], ACCS_UI = ['연금저축', 'ISA', '종합매매'];
+function netBreakdown(ownerF, accF){
+  const all = runPortfolioEngine().activeHoldings;
+  const owners = [], total = { eval: 0, cash: 0, net: 0, unknown: [] };
+  OWNERS_UI.filter(o => ownerF === 'all' || o === ownerF).forEach(o => {
+    const sub = { owner: o, eval: 0, cash: 0, net: 0, accs: [] };
+    ACCS_UI.filter(a => accF === 'all' || a === accF).forEach(a => {
+      if (!trades.some(t => t.owner === o && t.account === a) && !cashflows.some(c => c.owner === o && c.account === a)) return;
+      const ev = all.filter(h => h.owner === o && h.account === a).reduce((s, h) => s + h.evalAmount, 0);
+      const cs = cashSummary(o, a), has = cs.combos.size > 0, cash = has ? cs.cash : 0;
+      sub.accs.push({ account: a, eval: ev, cash, has, net: ev + cash });
+      sub.eval += ev; sub.cash += cash; sub.net += ev + cash;
+      if (!has) total.unknown.push(o + '·' + accountShort(a));
+    });
+    if (sub.accs.length) { owners.push(sub); total.eval += sub.eval; total.cash += sub.cash; total.net += sub.net; }
+  });
+  total.label = ownerF === 'all' ? (accF === 'all' ? '가족 전체' : '가족 전체 · ' + accountShort(accF)) : (accF === 'all' ? ownerF + ' 전체' : ownerF + ' · ' + accountShort(accF));
+  return { owners, total };
+}
+function renderNetTable(nb){
+  const row = (l, e, c, n, b, ind) => `<tr><td style="${ind ? 'padding-left:22px;color:var(--ink-dim)' : ''}${b ? ';font-weight:700' : ''}">${l}</td><td class="mono">${fmtWon(e)}</td><td class="mono">${c}</td><td class="mono ${b ? 'gold-text font-bold' : ''}">${fmtWon(n)}</td></tr>`;
+  let h = '';
+  nb.owners.forEach(o => {
+    h += row(o.owner, o.eval, fmtWon(o.cash), o.net, true, false);
+    o.accs.forEach(a => { h += row(accountLabel(a.account), a.eval, a.has ? fmtWon(a.cash) : '미확인', a.net, false, true); });
+  });
+  h += nb.owners.length ? `<tr style="border-top:1px solid var(--gold)">${row(nb.total.label, nb.total.eval, fmtWon(nb.total.cash), nb.total.net, true, false).slice(4)}` : '<tr><td colspan="4" class="text-center text-[var(--ink-dim)] py-3">선택한 소유자·계좌 조합의 데이터가 없습니다.</td></tr>';
+  document.getElementById('net-table').innerHTML = h;
+}
+function resetDetailPanel(){
+  document.getElementById('detail-title').textContent = '자산군 상세';
+  document.getElementById('detail-content').innerHTML = '<p class="text-[var(--ink-dim)]">도넛 차트의 자산 구분을 클릭하면 해당 자산군의 종목별 내역이 표시됩니다.</p>';
+}
+
 /* ---- 자산군 비중 / 목표 대비 (pp, 원화 과부족) ---- */
 function classWeightRows(holdings){
   const tot = holdings.reduce((s, h) => s + h.evalAmount, 0), by = {};
@@ -2006,7 +2049,10 @@ function renderExtra(hs, totalEval, ownerF, accF){
   const evC = hs.filter(h => cs.combos.has(h.owner + '|' + h.account)).reduce((s, h) => s + h.evalAmount, 0);
   const pl = evC + cs.cash - cs.invested, plPct = cs.invested > 0 ? pl / cs.invested * 100 : 0;
   const set = (id, t, v) => { const e = document.getElementById(id); e.textContent = t; if (v !== undefined) e.style.color = pnlColor(v); };
-  set('x-net', fmtWon(totalEval + cs.cash));
+  const nb = netBreakdown(ownerF, accF);
+  set('x-net', fmtWon(nb.total.net));
+  set('x-net-sub', nb.owners.length ? (nb.total.unknown.length ? '예수금 미확인: ' + nb.total.unknown.join(', ') : nb.total.label) : '해당 조합 데이터 없음');
+  renderNetTable(nb);
   set('x-invested', fmtWon(cs.invested));
   set('x-pl', fmtWon(pl), pl);
   set('x-pl-pct', (cs.invested > 0 ? signed(plPct, 2) + '%' : '-') + ' (업로드 계좌 기준)', pl);
