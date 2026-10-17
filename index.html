@@ -6,6 +6,7 @@
 <title>가족 자산 배분 원장 · 김인규 · 김혜영 (HTS PRO)</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css">
 <style>
   :root{
@@ -101,6 +102,10 @@
   .toast-container.show {
     opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto;
   }
+  .imp-chip{ display:inline-block; font-weight:700; font-size:12px; padding:4px 10px; border:1px solid var(--line); border-radius:99px; margin-right:6px; background:#0e1218; }
+  details > summary{ cursor:pointer; list-style:none; }
+  details > summary::-webkit-details-marker{ display:none; }
+  @media (max-width: 420px){ main{ padding-left:12px !important; padding-right:12px !important; } }
 </style>
 </head>
 <body class="min-h-screen flex flex-col">
@@ -118,6 +123,7 @@
         <p class="text-[10px] sm:text-[12px] text-[var(--ink-dim)]">다자녀 가구 절세계좌 · 가치 기반 리밸런싱</p>
       </div>
     </div>
+    <span id="sync-dot" class="text-[10px] sm:text-[11px] font-semibold" style="color:var(--ink-dim)">● 로컬</span>
     <div class="hidden sm:flex items-center gap-2">
       <div class="initial-badge" style="color:var(--gold-soft);">인규</div>
       <div class="initial-badge" style="color:var(--gold-soft);">혜영</div>
@@ -132,6 +138,7 @@
     <button class="tab-btn" data-tab="trades">05 · 매매일지</button>
     <button class="tab-btn" data-tab="rebalance">06 · 시세갱신 · 리밸런싱</button>
     <button class="tab-btn" data-tab="backup">07 · 백업 · 복구</button>
+    <button class="tab-btn" data-tab="import">08 · 거래내역 업로드</button>
   </nav>
 </header>
 
@@ -141,19 +148,35 @@
   <section id="tab-dashboard" class="fade-in">
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 sm:mb-6">
       <div class="flex flex-wrap items-center gap-2 sm:gap-3">
-        <select id="f-owner" class="w-full sm:w-auto text-xs sm:text-sm">
+        <select id="f-owner" class="flex-1 min-w-0 sm:flex-none text-xs sm:text-sm">
           <option value="all">소유자 전체</option>
           <option value="김인규">김인규</option>
           <option value="김혜영">김혜영</option>
         </select>
-        <select id="f-account" class="w-full sm:w-auto text-xs sm:text-sm">
+        <select id="f-account" class="flex-1 min-w-0 sm:flex-none text-xs sm:text-sm">
           <option value="all">계좌 전체</option>
           <option value="연금저축">연금저축계좌</option>
           <option value="ISA">ISA</option>
           <option value="종합매매">종합매매</option>
         </select>
       </div>
-      <span class="text-[11px] sm:text-[12px] text-[var(--ink-dim)]">필터 선택 시 실시간 반영됩니다. (종목 클릭 시 상세조회)</span>
+      <span class="hidden sm:inline text-[11px] sm:text-[12px] text-[var(--ink-dim)]">필터 선택 시 실시간 반영됩니다. (종목 클릭 시 상세조회)</span>
+    </div>
+
+    <!-- V3 : 첫 화면 핵심 지표 -->
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-4">
+      <div class="card p-3 sm:p-4"><p class="text-[10px] sm:text-[11px] text-[var(--ink-dim)] mb-1">총 순자산 (평가+예수금)</p><p class="text-sm sm:text-xl font-bold mono gold-text truncate" id="x-net">0원</p></div>
+      <div class="card p-3 sm:p-4"><p class="text-[10px] sm:text-[11px] text-[var(--ink-dim)] mb-1">총 투입금액 (입금-출금)</p><p class="text-sm sm:text-xl font-bold mono truncate" id="x-invested">0원</p></div>
+      <div class="card p-3 sm:p-4"><p class="text-[10px] sm:text-[11px] text-[var(--ink-dim)] mb-1">투입 대비 손익</p><p class="text-sm sm:text-xl font-bold mono truncate" id="x-pl">0원</p><p class="text-[10px] mono truncate" id="x-pl-pct">-</p></div>
+      <div class="card p-3 sm:p-4"><p class="text-[10px] sm:text-[11px] text-[var(--ink-dim)] mb-1">배당·분배금</p><p class="text-sm sm:text-xl font-bold mono truncate" id="x-dist">0원</p><p class="text-[10px] text-[var(--ink-dim)] mono truncate" id="x-sub">-</p></div>
+    </div>
+    <div class="card p-4 sm:p-5 mb-4 sm:mb-6">
+      <p class="text-[12px] sm:text-[13px] font-semibold mb-3 text-[var(--ink-dim)]">목표 비중 대비 현황 (세로선 = 목표 · 참고용)</p>
+      <div id="dash-target"></div>
+    </div>
+    <div class="card p-4 sm:p-5 mb-4 sm:mb-6">
+      <p class="text-[12px] sm:text-[13px] font-semibold mb-3 text-[var(--ink-dim)]">통합 보유 종목 (여러 계좌 합산 · 탭하여 계좌별 펼치기)</p>
+      <div id="consol-list" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3"></div>
     </div>
 
     <!-- HTS 확장형 6구 대시보드 카드 -->
@@ -216,7 +239,7 @@
     </div>
 
     <div class="grid grid-cols-1 xl:grid-cols-2 gap-4 sm:gap-5">
-      <div class="card p-4 sm:p-5 overflow-x-auto scrollbar-thin">
+      <div class="hidden sm:block card p-4 sm:p-5 overflow-x-auto scrollbar-thin">
         <p class="text-[12px] sm:text-[13px] font-semibold mb-1 text-[var(--ink-dim)]">테이블 1 · 종목별 수익 기여도 (보유 기준)</p>
         <p class="text-[10px] sm:text-[11px] text-[var(--ink-dim)] mb-3">개별 종목 평가손익 ÷ 전체 총 매입액 × 100</p>
         <table>
@@ -493,12 +516,18 @@
       </div>
     </div>
 
+    <div class="card p-4 sm:p-5 mb-4 sm:mb-6 overflow-x-auto scrollbar-thin">
+      <p class="text-[12px] sm:text-[13px] font-semibold mb-1 text-[var(--ink-dim)]">대분류 목표 비중 대비 현황 (평가금액 기준)</p>
+      <p class="text-[10px] sm:text-[11px] text-[var(--ink-dim)] mb-3">※ 참고용 정적 가이드입니다. 매매 권유가 아니며 최종 판단은 본인이 합니다. pp = 현재 비중 − 목표 비중.</p>
+      <table><thead><tr><th>자산구분</th><th>현재</th><th>목표</th><th>차이</th><th>평가금액</th><th>목표 대비 과부족</th></tr></thead>
+      <tbody id="class-rebal-table"></tbody></table>
+    </div>
     <div class="card p-4 sm:p-5 overflow-x-auto scrollbar-thin">
       <p class="text-[12px] sm:text-[13px] font-semibold mb-1 text-[var(--ink-dim)]">HTS 스마트 가치 기반 리밸런싱 가이드</p>
       <p class="text-[10px] sm:text-[11px] text-[var(--ink-dim)] mb-4">투자 대가들의 역행 제어 로직 적용 : 자산군 내 과열 종목 비중 축소 권고 / 저평가 종목 채우기 가이드</p>
       <table>
         <thead><tr>
-          <th>종목명 (소유자-계좌)</th><th>자산구분</th><th>현재 평가금액</th><th>현재 비중</th><th>정적 목표배분액</th><th>추천 리밸런싱 주문</th>
+          <th>종목명 (소유자-계좌)</th><th>자산구분</th><th>현재 평가금액</th><th>현재 비중</th><th>정적 목표배분액</th><th>참고 (정적 가이드)</th>
         </tr></thead>
         <tbody id="rebalance-table"></tbody>
       </table>
@@ -538,6 +567,28 @@
     </div>
   </section>
 
+  <!-- TAB 8: NAMU IMPORT -->
+  <section id="tab-import" class="hidden fade-in">
+    <div class="card p-4 sm:p-5 mb-4">
+      <p class="text-[13px] sm:text-[14px] font-semibold mb-1 gold-text">나무증권 거래내역(.xls) 업로드 · 누적</p>
+      <p class="text-[11px] sm:text-xs text-[var(--ink-dim)] mb-3">파일을 분석해 신규/중복/오류를 먼저 보여드립니다. 확인 후 [원장에 누적 반영]을 눌러야 저장됩니다. 같은 파일을 다시 올려도 중복은 자동 제외됩니다.</p>
+      <div class="grid grid-cols-2 gap-3 mb-3">
+        <div><label class="block text-[11px] text-[var(--ink-dim)] mb-1">소유자</label><select id="imp-owner" class="w-full"><option value="김인규">김인규</option><option value="김혜영">김혜영</option></select></div>
+        <div><label class="block text-[11px] text-[var(--ink-dim)] mb-1">계좌</label><select id="imp-account" class="w-full"><option value="연금저축">연금저축계좌</option><option value="ISA">ISA</option><option value="종합매매">종합매매</option></select></div>
+      </div>
+      <input type="file" id="imp-file" accept=".xls,.xlsx,.html,.htm" class="mb-3 w-full text-xs sm:text-sm">
+      <button id="imp-analyze-btn" class="btn-gold w-full sm:w-auto">파일 분석 (미리보기)</button>
+      <p id="imp-msg" class="text-[12px] mt-2 hidden"></p>
+    </div>
+    <div id="imp-result" class="card p-4 sm:p-5 hidden">
+      <div id="imp-summary" class="mb-3"></div>
+      <p id="imp-note" class="text-[11px] sm:text-xs text-[var(--ink-dim)] mb-3"></p>
+      <div class="overflow-auto scrollbar-thin border border-[var(--line)] rounded-lg mb-3" style="max-height:340px">
+        <table><thead><tr><th>상태</th><th>일자</th><th>구분/종목</th><th>수량</th><th>정산금액</th><th>비고</th></tr></thead><tbody id="imp-table"></tbody></table>
+      </div>
+      <button id="imp-commit-btn" class="btn-gold w-full sm:w-auto" disabled>원장에 누적 반영</button>
+    </div>
+  </section>
 </main>
 
 <!-- 종목 상세 조회 다이얼로그 모달 -->
@@ -592,7 +643,7 @@
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getAnalytics } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-analytics.js";
-import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { getFirestore, doc, setDoc, getDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCuksqN08CgrkjsCNng1Fa17XBBi9Zf5yo",
@@ -616,6 +667,8 @@ const LS_TRADES   = 'fam_trades_v2';
 const LS_PRICES   = 'fam_prices_v1';
 const LS_ASSET_TARGETS = 'fam_asset_targets_v1';
 const LS_STOCKS   = 'fam_stocks_v1';
+const LS_CASH     = 'fam_cashflows_v1';
+const LS_REV      = 'fam_rev_v1';
 
 const ASSET_CLASSES = ['국내주식','미국주식','채권','개별주','현금(CMA)','금','기타'];
 const UNCLASSIFIED = '미분류';
@@ -625,6 +678,9 @@ let trades   = loadJSON(LS_TRADES, []);
 let prices   = loadJSON(LS_PRICES, {});
 let assetTargets = loadJSON(LS_ASSET_TARGETS, {});
 let stocks   = loadJSON(LS_STOCKS, []);
+let cashflows = loadJSON(LS_CASH, []);
+let localRev = Number(localStorage.getItem(LS_REV)) || 0;
+let applyingRemote = false, pushTimer = null;
 
 let currentPriceMap = loadJSON('fam_current_prices_v2_map', {});
 
@@ -637,13 +693,15 @@ function loadJSON(key, fallback){
   }catch(e){ return fallback; }
 }
 
-function saveAll(){
+function saveAll(silent){
+  localStorage.setItem(LS_CASH, JSON.stringify(cashflows));
   localStorage.setItem(LS_ACCOUNTS, JSON.stringify(accounts));
   localStorage.setItem(LS_TRADES, JSON.stringify(trades));
   localStorage.setItem(LS_PRICES, JSON.stringify(prices));
   localStorage.setItem(LS_ASSET_TARGETS, JSON.stringify(assetTargets));
   localStorage.setItem(LS_STOCKS, JSON.stringify(stocks));
   localStorage.setItem('fam_current_prices_v2_map', JSON.stringify(currentPriceMap));
+  if (!silent && !applyingRemote) { localRev = Date.now(); localStorage.setItem(LS_REV, String(localRev)); schedulePush(); }
 }
 
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
@@ -712,106 +770,54 @@ attachCommaFormatting(document.getElementById('tr-price'));
 /* ---------------------------------------------------------
    HTS ENGINE : CORE CALCULATION LOOP
 --------------------------------------------------------- */
+/* 정산금액(정수 원): 매수=실제 지불액(수수료 포함), 매도=실제 수령액(수수료·세금 차감). 수동 입력분은 수량×단가 */
+function tradeCash(t){
+  if (Number.isFinite(t.settle) && t.settle > 0) return Math.round(t.settle);
+  return Math.round(t.qty * t.price);
+}
 function runPortfolioEngine(){
-  const chronologicalTrades = [...trades].sort((a,b) => a.date.localeCompare(b.date));
-  
-  const ledger = {};
-  const stockRealizedMap = {};
-  
-  chronologicalTrades.forEach(t => {
+  const chrono = trades.map((t, i) => ({ t, i })).sort((a, b) => a.t.date.localeCompare(b.t.date) || a.i - b.i).map(x => x.t);
+  const ledger = {}, stockRealizedMap = {};
+  chrono.forEach(t => {
     const k = keyOf(t.owner, t.account, t.name);
-    if (!ledger[k]) {
-      ledger[k] = { qty: 0, avgPrice: 0, totalBuyAmt: 0 };
-    }
-    if (!stockRealizedMap[k]) {
-      stockRealizedMap[k] = { realizedProfit: 0, closedWinCount:0, closedLossCount:0, totalSellAmt: 0, totalSellQty: 0, totalWinSumPct: 0, totalLossSumPct: 0 };
-    }
-    
-    const currentHolding = ledger[k];
-    const stat = stockRealizedMap[k];
-    const txAmt = t.qty * t.price;
-    
+    const L = ledger[k] || (ledger[k] = { qty: 0, cost: 0 });
+    const S = stockRealizedMap[k] || (stockRealizedMap[k] = { realizedProfit: 0, closedWinCount: 0, closedLossCount: 0, totalSellAmt: 0, totalSellQty: 0, totalWinSumPct: 0, totalLossSumPct: 0 });
+    const cash = tradeCash(t);
     if (t.action === '매수') {
-      if (currentHolding.qty === 0) {
-        currentHolding.avgPrice = t.price;
-        currentHolding.totalBuyAmt = txAmt;
-        currentHolding.qty = t.qty;
-      } else {
-        const nextAmt = currentHolding.totalBuyAmt + txAmt;
-        const nextQty = currentHolding.qty + t.qty;
-        currentHolding.avgPrice = nextAmt / nextQty;
-        currentHolding.totalBuyAmt = nextAmt;
-        currentHolding.qty = nextQty;
-      }
-      t._calculatedAvgPrice = currentHolding.avgPrice;
-      t._calculatedRealized = 0;
-      t._calculatedRoi = 0;
-    } 
-    else if (t.action === '매도') {
-      const sellQty = t.qty;
-      const baseAvgPrice = currentHolding.avgPrice;
-      
-      const realizedProfit = (t.price - baseAvgPrice) * sellQty;
-      const tradeRoi = baseAvgPrice > 0 ? ((t.price - baseAvgPrice) / baseAvgPrice) * 100 : 0;
-      
-      stat.realizedProfit += realizedProfit;
-      stat.totalSellAmt += txAmt;
-      stat.totalSellQty += sellQty;
-      
-      if (realizedProfit >= 0) {
-        stat.closedWinCount++;
-        stat.totalWinSumPct += tradeRoi;
-      } else {
-        stat.closedLossCount++;
-        stat.totalLossSumPct += tradeRoi;
-      }
-      
-      currentHolding.qty -= sellQty;
-      if (currentHolding.qty <= 0) {
-        currentHolding.qty = 0;
-        currentHolding.avgPrice = 0;
-        currentHolding.totalBuyAmt = 0;
-      } else {
-        currentHolding.totalBuyAmt = currentHolding.qty * currentHolding.avgPrice;
-      }
-      
-      t._calculatedAvgPrice = baseAvgPrice;
-      t._calculatedRealized = realizedProfit;
-      t._calculatedRoi = tradeRoi;
+      L.qty += t.qty; L.cost += cash;
+      t._calculatedAvgPrice = L.cost / L.qty; t._calculatedRealized = 0; t._calculatedRoi = 0;
+    } else if (t.action === '매도') {
+      const sq = Math.min(t.qty, L.qty);
+      const removed = L.qty > 0 ? Math.round(L.cost * sq / L.qty) : 0;   // 잔여 원가 차감 (정수)
+      const proceeds = sq === t.qty ? cash : Math.round(cash * sq / t.qty);
+      const avg = L.qty > 0 ? L.cost / L.qty : 0;
+      const profit = proceeds - removed;
+      const roi = removed > 0 ? profit / removed * 100 : 0;
+      L.qty -= sq; L.cost -= removed;
+      if (L.qty <= 0) { L.qty = 0; L.cost = 0; }
+      S.realizedProfit += profit; S.totalSellAmt += proceeds; S.totalSellQty += sq;
+      if (profit >= 0) { S.closedWinCount++; S.totalWinSumPct += roi; } else { S.closedLossCount++; S.totalLossSumPct += roi; }
+      t._calculatedAvgPrice = avg; t._calculatedRealized = profit; t._calculatedRoi = roi;
     }
   });
-
   const activeHoldings = [];
   Object.entries(ledger).forEach(([k, v]) => {
     if (v.qty <= 0) return;
     const [owner, account, name] = k.split('|');
-    
-    const currentPrice = currentPriceMap[name] || v.avgPrice;
-    const evalAmount = v.qty * currentPrice;
-    const remainingCost = v.totalBuyAmt; 
-    const profit = evalAmount - remainingCost;
-    const roi = remainingCost > 0 ? (profit / remainingCost) * 100 : 0;
-    
-    activeHoldings.push({
-      key: k, owner, account, name,
-      assetClass: stockAssetClass(name),
-      netQty: v.qty,
-      avgBuyPrice: v.avgPrice,
-      remainingCost,
-      currentPrice,
-      evalAmount,
-      profit,
-      roi
-    });
+    const avg = v.cost / v.qty;
+    const currentPrice = currentPriceMap[name] || avg;
+    const evalAmount = Math.round(v.qty * currentPrice);
+    const profit = evalAmount - v.cost;
+    activeHoldings.push({ key: k, owner, account, name, assetClass: stockAssetClass(name), netQty: v.qty, avgBuyPrice: avg,
+      remainingCost: v.cost, currentPrice, evalAmount, profit, roi: v.cost > 0 ? profit / v.cost * 100 : 0 });
   });
-
   return { activeHoldings, stockRealizedMap };
 }
 
 /* ---------------------------------------------------------
    TAB NAVIGATION SYSTEM
 --------------------------------------------------------- */
-const tabNames = ['dashboard','realized','stocks','limits','trades','rebalance','backup'];
+const tabNames = ['dashboard','realized','stocks','limits','trades','rebalance','backup','import'];
 document.getElementById('tabNav').addEventListener('click', (e) => {
   const btn = e.target.closest('.tab-btn');
   if (!btn) return;
@@ -891,6 +897,8 @@ function renderDashboard(){
   renderAssetClassDonut(filteredHoldings, totalEval);
   renderHoldingsTable(filteredHoldings, totalBuy);
   renderAssetClassTable(filteredHoldings, totalBuy);
+  renderExtra(filteredHoldings, totalEval, ownerF, accF);
+  renderConsolidated(filteredHoldings);
 }
 
 function setProfitLossStyle(el, val, text){
@@ -1270,7 +1278,7 @@ function openStockDetailModal(owner, account, name){
                              
   targetTrades.forEach(t => {
     const tr = document.createElement('tr');
-    const amt = t.qty * t.price;
+    const amt = tradeCash(t);
     const isBuy = t.action === '매수';
     
     let profitTd = '<span class="text-gray-600">-</span>';
@@ -1555,7 +1563,7 @@ function renderTrades(){
 
   const sorted = [...trades].sort((a,b) => b.date.localeCompare(a.date));
   sorted.forEach(t => {
-    const amt = t.qty * t.price;
+    const amt = tradeCash(t);
     const actionColor = t.action === '매수' ? 'var(--profit)' : 'var(--loss)';
     const tr = document.createElement('tr');
     
@@ -1722,6 +1730,7 @@ function updateTargetSum(){
 
 function renderRebalanceGuide(){
   const { activeHoldings } = runPortfolioEngine();
+  renderClassRebalance(activeHoldings);
   const tbody = document.getElementById('rebalance-table');
   const empty = document.getElementById('rebalance-empty');
   tbody.innerHTML = '';
@@ -1766,10 +1775,10 @@ function renderRebalanceGuide(){
       if (Math.abs(diff) < 10000) {
         actionText = '유지 (적정 비중)';
       } else if (diff > 0) {
-        actionText = `▲ ${fmtWon(diff)} 추가 분할매수`;
+        actionText = `참고 · 목표까지 ${fmtWon(diff)} 부족`;
         actionColor = 'var(--profit)';
       } else {
-        actionText = `▼ ${fmtWon(Math.abs(diff))} 리밸런싱 매도 권고`;
+        actionText = `참고 · 목표 대비 ${fmtWon(Math.abs(diff))} 초과`;
         actionColor = 'var(--loss)';
       }
 
@@ -1800,7 +1809,7 @@ function renderRebalanceGuide(){
 --------------------------------------------------------- */
 document.getElementById('export-btn').addEventListener('click', () => {
   const payload = { 
-    accounts, trades, prices, assetTargets, stocks, currentPriceMap,
+    accounts, trades, prices, assetTargets, stocks, currentPriceMap, cashflows,
     v: "HTS_PRO_V2",
     exportedAt: new Date().toISOString() 
   };
@@ -1822,7 +1831,7 @@ document.getElementById('firebase-save-btn').addEventListener('click', async () 
 
   try {
     const payload = { 
-      accounts, trades, prices, assetTargets, stocks, currentPriceMap,
+      accounts, trades, prices, assetTargets, stocks, currentPriceMap, cashflows,
       v: "HTS_PRO_V2",
       updatedAt: new Date().toISOString() 
     };
@@ -1861,6 +1870,7 @@ document.getElementById('firebase-load-btn').addEventListener('click', async () 
       assetTargets = data.assetTargets || {};
       stocks = Array.isArray(data.stocks) ? data.stocks : [];
       currentPriceMap = data.currentPriceMap || {};
+      cashflows = Array.isArray(data.cashflows) ? data.cashflows : cashflows;
 
       saveAll();
       msg.textContent = '✅ Firebase 원장 불러오기가 성공적으로 완료되었습니다.';
@@ -1898,6 +1908,7 @@ document.getElementById('import-btn').addEventListener('click', () => {
       assetTargets = data.assetTargets || {};
       stocks = Array.isArray(data.stocks) ? data.stocks : [];
       currentPriceMap = data.currentPriceMap || {};
+      cashflows = Array.isArray(data.cashflows) ? data.cashflows : cashflows;
       
       saveAll();
       msg.textContent = '✅ HTS 복구 동기화가 정상 완료되었습니다.';
@@ -1916,8 +1927,8 @@ document.getElementById('import-btn').addEventListener('click', () => {
 });
 
 document.getElementById('reset-btn').addEventListener('click', () => {
-  if (!confirm('경고: 복구가 불가능한 원장 포맷 작업입니다. 속행하겠습니까?')) return;
-  accounts = []; trades = []; prices = {}; assetTargets = {}; stocks = []; currentPriceMap = {};
+  if (!confirm('경고: 복구가 불가능한 원장 포맷 작업입니다. 실시간 동기화 중이면 클라우드와 다른 기기에도 반영됩니다. 속행하겠습니까?')) return;
+  accounts = []; trades = []; prices = {}; assetTargets = {}; stocks = []; currentPriceMap = {}; cashflows = [];
   saveAll();
   location.reload();
 });
@@ -1926,7 +1937,10 @@ document.getElementById('reset-btn').addEventListener('click', () => {
    DATA MIGRATION
 --------------------------------------------------------- */
 function executeDataMigration(){
+  if (!Array.isArray(cashflows)) cashflows = [];
   trades.forEach(t => {
+    if (t.fee == null) t.fee = 0;
+    if (t.tax == null) t.tax = 0;
     if (t.name && !stocks.some(s => s.name === t.name)) {
       stocks.push({ id: uid(), name: t.name, assetClass: t.assetClass || UNCLASSIFIED });
     }
@@ -1934,7 +1948,294 @@ function executeDataMigration(){
       t.reason = t.memo === '리밸런싱' ? '리밸런싱' : '익절';
     }
   });
+  saveAll(true);
+}
+
+/* =========================================================
+   V3 ADD-ON : 나무증권 업로드 · 현금흐름 · 통합보기 · 목표비중 · 실시간 동기화
+========================================================= */
+const pnlColor = v => v > 0 ? 'var(--profit)' : v < 0 ? 'var(--loss)' : 'var(--ink)';
+const signed = (v, d) => (v >= 0 ? '+' : '') + v.toFixed(d);
+
+/* ---- 현금흐름 요약 (입금·출금·분배금·이용료·예수금) : 전부 정수 원 단위 ---- */
+function cashSummary(ownerF, accF){
+  const inScope = x => (ownerF === 'all' || x.owner === ownerF) && (accF === 'all' || x.account === accF);
+  const s = { invested: 0, dist: 0, interest: 0, cash: 0, combos: new Set() };
+  cashflows.filter(inScope).forEach(c => {
+    const a = Math.round(c.amount) || 0;
+    s.combos.add(c.owner + '|' + c.account);
+    if (c.kind === '입금') { s.invested += a; s.cash += a; }
+    else if (c.kind === '출금') { s.invested -= a; s.cash -= a; }
+    else if (c.kind === '분배금') { s.dist += a; s.cash += a; }
+    else { s.interest += a; s.cash += a; }
+  });
+  trades.filter(t => inScope(t) && s.combos.has(t.owner + '|' + t.account))
+        .forEach(t => { s.cash += (t.action === '매수' ? -1 : 1) * tradeCash(t); });
+  return s;
+}
+
+/* ---- 자산군 비중 / 목표 대비 (pp, 원화 과부족) ---- */
+function classWeightRows(holdings){
+  const tot = holdings.reduce((s, h) => s + h.evalAmount, 0), by = {};
+  holdings.forEach(h => { by[h.assetClass] = (by[h.assetClass] || 0) + h.evalAmount; });
+  const names = [...new Set([...ASSET_CLASSES, ...Object.keys(by)])];
+  const rows = names.map(c => {
+    const ev = by[c] || 0, tp = Number(assetTargets[c]) || 0, cp = tot > 0 ? ev / tot * 100 : 0;
+    return { c, ev, tp, cp, pp: cp - tp, gap: Math.round(tot * tp / 100) - ev };
+  }).filter(r => r.ev > 0 || r.tp > 0);
+  return { tot, rows };
+}
+function gapText(r){
+  if (Math.abs(r.gap) < 1) return '목표 일치';
+  return r.gap > 0 ? `목표까지 ${fmtWon(r.gap)} 부족` : `목표 대비 ${fmtWon(-r.gap)} 초과`;
+}
+function renderClassRebalance(holdings){
+  const tb = document.getElementById('class-rebal-table');
+  const { rows } = classWeightRows(holdings);
+  tb.innerHTML = rows.length ? rows.map(r => `<tr>
+    <td><span class="asset-chip">${escapeHtml(r.c)}</span></td>
+    <td class="mono">${r.cp.toFixed(1)}%</td><td class="mono">${r.tp.toFixed(1)}%</td>
+    <td class="mono" style="color:${Math.abs(r.pp) < 0.05 ? 'var(--ink)' : 'var(--warn)'}">${signed(r.pp, 1)}pp</td>
+    <td class="mono">${fmtWon(r.ev)}</td><td class="text-xs" style="color:var(--ink-dim)">${gapText(r)}</td></tr>`).join('')
+    : '<tr><td colspan="6" class="text-center text-[var(--ink-dim)] py-3">보유 종목 또는 목표 비중이 없습니다.</td></tr>';
+}
+
+/* ---- 대시보드 확장 지표 + 통합 보유 종목 ---- */
+function renderExtra(hs, totalEval, ownerF, accF){
+  const cs = cashSummary(ownerF, accF);
+  const evC = hs.filter(h => cs.combos.has(h.owner + '|' + h.account)).reduce((s, h) => s + h.evalAmount, 0);
+  const pl = evC + cs.cash - cs.invested, plPct = cs.invested > 0 ? pl / cs.invested * 100 : 0;
+  const set = (id, t, v) => { const e = document.getElementById(id); e.textContent = t; if (v !== undefined) e.style.color = pnlColor(v); };
+  set('x-net', fmtWon(totalEval + cs.cash));
+  set('x-invested', fmtWon(cs.invested));
+  set('x-pl', fmtWon(pl), pl);
+  set('x-pl-pct', (cs.invested > 0 ? signed(plPct, 2) + '%' : '-') + ' (업로드 계좌 기준)', pl);
+  set('x-dist', fmtWon(cs.dist));
+  set('x-sub', `이용료 ${fmtWon(cs.interest)} · 예수금 ${fmtWon(cs.cash)}`);
+  const { rows } = classWeightRows(hs);
+  const box = document.getElementById('dash-target');
+  box.innerHTML = rows.filter(r => r.tp > 0 || r.ev > 0).map(r => `
+    <div class="mb-2"><div class="flex justify-between text-[11px] sm:text-xs mb-1">
+      <span><span class="asset-chip">${escapeHtml(r.c)}</span></span>
+      <span class="mono">${r.cp.toFixed(1)}% / 목표 ${r.tp.toFixed(0)}% · <b style="color:${Math.abs(r.pp) < 0.05 ? 'var(--ink)' : 'var(--warn)'}">${signed(r.pp, 1)}pp</b></span></div>
+      <div class="progress-track" style="height:7px;position:relative"><div class="progress-fill" style="width:${Math.min(100, r.cp)}%;background:var(--gold)"></div>
+      ${r.tp > 0 ? `<div style="position:absolute;top:-2px;bottom:-2px;left:${Math.min(100, r.tp)}%;width:2px;background:var(--ink)"></div>` : ''}</div></div>`).join('')
+    || '<p class="text-xs text-[var(--ink-dim)]">보유 종목이 없거나 목표 비중이 설정되지 않았습니다.</p>';
+}
+function consolidate(hs){
+  const m = {};
+  hs.forEach(h => {
+    const g = m[h.name] || (m[h.name] = { name: h.name, cls: h.assetClass, qty: 0, cost: 0, ev: 0, price: h.currentPrice, parts: [] });
+    g.qty += h.netQty; g.cost += h.remainingCost; g.ev += h.evalAmount; g.parts.push(h);
+  });
+  return Object.values(m).sort((a, b) => b.ev - a.ev);
+}
+function renderConsolidated(hs){
+  const box = document.getElementById('consol-list');
+  const list = consolidate(hs);
+  box.innerHTML = list.length ? list.map(g => {
+    const pl = g.ev - g.cost, roi = g.cost > 0 ? pl / g.cost * 100 : 0;
+    return `<div class="card-2 p-3"><div class="flex justify-between items-start gap-2">
+      <div class="min-w-0"><p class="font-semibold text-sm truncate gold-text">${escapeHtml(g.name)}</p><span class="asset-chip">${escapeHtml(g.cls)}</span></div>
+      <div class="text-right"><p class="mono font-bold text-sm">${fmtWon(g.ev)}</p>
+      <p class="mono text-xs" style="color:${pnlColor(pl)}">${fmtWon(pl)} (${signed(roi, 2)}%)</p></div></div>
+      <p class="text-[11px] text-[var(--ink-dim)] mt-2 mono">${fmtNum(g.qty)}주 · 평균 ${fmtNum(g.cost / g.qty)}원 · 현재가 ${fmtNum(g.price)}원</p>
+      <details class="mt-2"><summary class="text-[11px] text-[var(--ink-dim)]">계좌별 보유 ${g.parts.length}건 펼치기</summary>
+      ${g.parts.map(h => `<div class="flex justify-between text-[11px] mono py-1 border-t border-[var(--line)] mt-1">
+        <span>${h.owner}·${accountShort(h.account)} ${fmtNum(h.netQty)}주</span>
+        <span style="color:${pnlColor(h.profit)}">${fmtWon(h.evalAmount)} (${signed(h.roi, 1)}%)</span></div>`).join('')}</details></div>`;
+  }).join('') : '<p class="empty-state">보유 종목이 없습니다.</p>';
+}
+
+/* ---- 나무증권 .xls (HTML 테이블, EUC-KR) 파싱 ---- */
+function parseNamuBuffer(buf){
+  const u8 = new Uint8Array(buf);
+  if (u8[0] === 0xD0 && u8[1] === 0xCF && typeof XLSX !== 'undefined') {   // 진짜 BIFF .xls 대비
+    const wb = XLSX.read(buf, { type: 'array' });
+    return XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: false, defval: '' }).map(r => r.map(c => String(c).trim()));
+  }
+  let txt = new TextDecoder('euc-kr').decode(buf);
+  if (!/거래유형/.test(txt)) txt = new TextDecoder('utf-8').decode(buf);
+  const doc = new DOMParser().parseFromString(txt, 'text/html');
+  return [...doc.querySelectorAll('tr')].map(tr => [...tr.children].map(c => c.textContent.replace(/\s+/g, ' ').trim()));
+}
+function guessClass(n){
+  if (/S&P|나스닥|NASDAQ|미국|해외/i.test(n)) return '미국주식';
+  if (/채권|국채|회사채|머니마켓|KOFR|CD금리/.test(n)) return '채권';
+  if (/골드|금현물|GOLD/i.test(n)) return '금';
+  if (/KODEX|TIGER|ACE|KBSTAR|SOL|HANARO|ARIRANG|코스피|코스닥|200/i.test(n)) return '국내주식';
+  return UNCLASSIFIED;
+}
+function analyzeNamu(rows, owner, account){
+  const hi = rows.findIndex(r => r.includes('거래유형'));
+  if (hi < 0) throw new Error("나무증권 거래내역 형식(‘거래유형’ 열)을 찾지 못했습니다.");
+  const H = rows[hi], ix = n => H.indexOf(n);
+  const C = { d: ix('실거래일자'), ty: ix('거래유형'), de: ix('상세내용'), nm: ix('종목명'), q: ix('수량'), p: ix('단가'), s: ix('정산금액'), b: ix('잔고'), f: ix('수수료'), tx: ix('세금'), td: ix('거래일자') };
+  ['d', 'ty', 'de', 'nm', 'q', 'p', 's'].forEach(k => { if (C[k] < 0) throw new Error('필수 열이 없습니다: ' + k); });
+  const num = v => Math.round(Number(String(v == null ? '' : v).replace(/[^0-9.-]/g, '')) || 0);
+  const dt = v => String(v || '').trim().replace(/\./g, '-');
+  const data = rows.slice(hi + 1).filter(r => r.length > C.ty && r[C.ty]).map(r => ({
+    date: dt(r[C.d]), tdate: dt(C.td >= 0 ? r[C.td] : r[C.d]), type: r[C.ty], detail: r[C.de], name: r[C.nm],
+    qty: num(r[C.q]), price: num(r[C.p]), settle: num(r[C.s]), bal: C.b >= 0 ? num(r[C.b]) : null,
+    fee: C.f >= 0 ? num(r[C.f]) : 0, tax: C.tx >= 0 ? num(r[C.tx]) : 0 }));
+  if (data.length > 1 && data[0].date >= data[data.length - 1].date) data.reverse();   // 최신순 → 시간순
+  const keys = new Set([...trades.map(t => t.key), ...cashflows.map(c => c.key)].filter(Boolean));
+  const legacy = trades.filter(t => !t.key && t.owner === owner && t.account === account);
+  const used = new Set(), seen = {}, held = {}, lastBal = {}, items = [];
+  trades.filter(t => t.owner === owner && t.account === account)
+        .forEach(t => { held[t.name] = (held[t.name] || 0) + (t.action === '매수' ? t.qty : -t.qty); });
+  data.forEach(r => {
+    const base = [owner, account, r.tdate, r.name, r.type, r.detail, r.qty, r.settle].join('|');
+    seen[base] = (seen[base] || 0) + 1;
+    const it = { r, key: base + '#' + seen[base], status: 'new', kind: r.type, msg: '' };
+    const isTrade = r.type === '매수' || r.type === '매도';
+    if (isTrade) {
+      if (!r.name || r.qty <= 0 || r.price <= 0 || r.settle <= 0) { it.status = 'err'; it.msg = '종목·수량·단가·정산금액 확인 필요'; }
+    } else if (r.type === '입금' || r.type === '출금') {
+      it.kind = r.type === '출금' ? '출금' : /분배금|배당/.test(r.detail) ? '분배금' : /이용료|이자/.test(r.detail) ? '이용료' : '입금';
+      if (r.settle <= 0) { it.status = 'err'; it.msg = '금액 없음'; }
+    } else { it.status = 'err'; it.msg = '지원하지 않는 거래유형'; }
+    if (it.status === 'new' && keys.has(it.key)) { it.status = 'dup'; it.msg = '이미 반영된 거래'; }
+    if (it.status === 'new' && isTrade) {
+      const lg = legacy.find(t => !used.has(t.id) && t.date === r.date && t.name === r.name && t.action === r.type && t.qty === r.qty);
+      if (lg) { used.add(lg.id); it.status = 'dup'; it.msg = '수동 입력 기록과 동일'; }
+    }
+    if (it.status === 'new' && r.type === '매도') {
+      if ((held[r.name] || 0) < r.qty) { it.status = 'err'; it.msg = '보유수량 초과 (이전 내역 누락 가능)'; }
+      else held[r.name] -= r.qty;
+    } else if (it.status === 'new' && r.type === '매수') held[r.name] = (held[r.name] || 0) + r.qty;
+    if (isTrade && r.bal != null) lastBal[r.name] = r.bal;
+    items.push(it);
+  });
+  const checks = Object.keys(lastBal).map(n => ({ n, file: lastBal[n], ledger: held[n] || 0 }));
+  return { items, checks, owner, account };
+}
+let pendingImport = null;
+function renderImportPreview(){
+  const p = pendingImport, c = { new: 0, dup: 0, err: 0 };
+  p.items.forEach(i => c[i.status]++);
+  document.getElementById('imp-summary').innerHTML =
+    `<span class="imp-chip" style="color:var(--profit)">신규 ${c.new}건</span><span class="imp-chip" style="color:var(--warn)">중복 ${c.dup}건</span><span class="imp-chip" style="color:var(--loss)">오류 ${c.err}건</span>`;
+  const label = { new: '신규', dup: '중복', err: '오류' }, col = { new: 'var(--profit)', dup: 'var(--warn)', err: 'var(--loss)' };
+  document.getElementById('imp-table').innerHTML = p.items.map(i => `<tr>
+    <td style="color:${col[i.status]};font-weight:700">${label[i.status]}</td><td class="mono">${i.r.date}</td>
+    <td>${escapeHtml(i.kind)}<br><span class="text-[10px] text-[var(--ink-dim)]">${escapeHtml(i.r.name || i.r.detail)}</span></td>
+    <td class="mono">${i.r.qty ? fmtNum(i.r.qty) : '-'}</td><td class="mono">${fmtNum(i.r.settle)}</td>
+    <td class="text-[10px] text-[var(--ink-dim)]">${escapeHtml(i.msg)}</td></tr>`).join('');
+  const newNames = [...new Set(p.items.filter(i => i.status === 'new' && i.r.name && !stocks.some(s => s.name === i.r.name)).map(i => i.r.name))];
+  document.getElementById('imp-note').innerHTML =
+    (p.checks.length ? '<b>HTS 잔고 대조</b> ' + p.checks.map(k => `${escapeHtml(k.n)}: 파일 ${fmtNum(k.file)}주 / 원장 ${fmtNum(k.ledger)}주 ${k.file === k.ledger ? '✅' : '⚠️'}`).join(' · ') : '')
+    + (newNames.length ? `<br>신규 종목 자산구분(추정, 03 탭에서 수정 가능): ${newNames.map(n => escapeHtml(n) + '→' + guessClass(n)).join(', ')}` : '');
+  document.getElementById('imp-commit-btn').disabled = c.new === 0;
+  document.getElementById('imp-result').classList.remove('hidden');
+}
+document.getElementById('imp-file').addEventListener('change', e => {
+  const n = (e.target.files[0] || {}).name || '';
+  if (n.includes('김혜영')) document.getElementById('imp-owner').value = '김혜영';
+  else if (n.includes('김인규')) document.getElementById('imp-owner').value = '김인규';
+  if (/ISA/i.test(n)) document.getElementById('imp-account').value = 'ISA';
+  else if (n.includes('연금')) document.getElementById('imp-account').value = '연금저축';
+  else if (/종합|위탁/.test(n)) document.getElementById('imp-account').value = '종합매매';
+});
+document.getElementById('imp-analyze-btn').addEventListener('click', async () => {
+  const msg = document.getElementById('imp-msg'), f = document.getElementById('imp-file').files[0];
+  msg.classList.remove('hidden'); msg.style.color = 'var(--loss)';
+  if (!f) { msg.textContent = '나무증권 거래내역(.xls) 파일을 선택하세요.'; return; }
+  try {
+    const rows = parseNamuBuffer(await f.arrayBuffer());
+    pendingImport = analyzeNamu(rows, document.getElementById('imp-owner').value, document.getElementById('imp-account').value);
+    msg.textContent = `✅ ${pendingImport.items.length}행 분석 완료 — 아래 미리보기를 확인한 뒤 반영하세요.`; msg.style.color = 'var(--profit)';
+    renderImportPreview();
+  } catch (err) { pendingImport = null; msg.textContent = '❌ ' + err.message; document.getElementById('imp-result').classList.add('hidden'); }
+});
+function commitNamu(){
+  if (!pendingImport) return 0;
+  const { items, owner, account } = pendingImport;
+  const keys = new Set([...trades.map(t => t.key), ...cashflows.map(c => c.key)].filter(Boolean));
+  let nt = 0, nc = 0;
+  items.filter(i => i.status === 'new' && !keys.has(i.key)).forEach(i => {
+    const r = i.r;
+    if (r.type === '매수' || r.type === '매도') {
+      if (!stocks.some(s => s.name === r.name)) stocks.push({ id: uid(), name: r.name, assetClass: guessClass(r.name) });
+      trades.push({ id: uid(), date: r.date, owner, account, name: r.name, assetClass: stockAssetClass(r.name), action: r.type,
+        reason: r.type === '매도' ? '기타' : '해당없음', qty: r.qty, price: r.price, memo: '나무증권 업로드',
+        fee: r.fee, tax: r.tax, settle: r.settle, key: i.key, src: 'namu' }); nt++;
+    } else {
+      cashflows.push({ id: uid(), date: r.date, owner, account, kind: i.kind, name: r.name, amount: r.settle, key: i.key, src: 'namu' }); nc++;
+    }
+  });
+  pendingImport = null;
   saveAll();
+  return nt + nc;
+}
+document.getElementById('imp-commit-btn').addEventListener('click', () => {
+  if (!pendingImport || !confirm('미리보기의 신규 건만 기존 원장 뒤에 누적합니다. 진행할까요?')) return;
+  const n = commitNamu();
+  document.getElementById('imp-result').classList.add('hidden');
+  document.getElementById('imp-file').value = '';
+  showToast(`신규 ${n}건이 원장에 반영되었습니다.`);
+  switchTab('dashboard');
+});
+
+/* ---- Firebase 실시간 동기화 (onSnapshot · 최종 수정시각 rev 기준) ---- */
+function setSync(t, c){ const e = document.getElementById('sync-dot'); e.textContent = '● ' + t; e.style.color = c; }
+function buildPayload(){
+  return { accounts, trades, prices, assetTargets, stocks, currentPriceMap, cashflows, v: 'HTS_PRO_V3', rev: localRev, updatedAt: new Date().toISOString() };
+}
+function schedulePush(){ clearTimeout(pushTimer); pushTimer = setTimeout(pushCloud, 700); }
+async function pushCloud(){
+  try { setSync('동기화 중', 'var(--warn)'); await setDoc(doc(db, 'portfolio', 'family_ledger'), buildPayload()); setSync('실시간 연결', 'var(--profit)'); }
+  catch (e) { console.error(e); setSync('오프라인 · 로컬 저장됨', 'var(--loss)'); }
+}
+function persistRev(){ localStorage.setItem(LS_REV, String(localRev)); }
+function hasLocalData(){ return trades.length || accounts.length || stocks.length || cashflows.length; }
+function unionBy(a, b, kf){ const m = new Map(); [...a, ...b].forEach(x => { const k = kf(x); if (!m.has(k)) m.set(k, x); }); return [...m.values()]; }
+function mergeRemote(d){   // 이 기기가 한 번도 동기화되지 않은 첫 연결: 양쪽 데이터를 합집합으로 보존
+  const arr = x => Array.isArray(x) ? x : [];
+  trades = unionBy(trades, arr(d.trades), t => t.id);
+  cashflows = unionBy(cashflows, arr(d.cashflows), c => c.id);
+  accounts = unionBy(accounts, arr(d.accounts), a => a.owner + '|' + a.type);
+  stocks = unionBy(stocks, arr(d.stocks), s => s.name);
+  assetTargets = { ...(d.assetTargets || {}), ...assetTargets };
+  currentPriceMap = { ...(d.currentPriceMap || {}), ...currentPriceMap };
+  prices = { ...(d.prices || {}), ...prices };
+}
+function applyRemote(d, rrev){
+  const arr = x => Array.isArray(x) ? x : [];
+  applyingRemote = true;
+  accounts = arr(d.accounts); trades = arr(d.trades); stocks = arr(d.stocks); cashflows = arr(d.cashflows);
+  prices = d.prices || {}; assetTargets = d.assetTargets || {}; currentPriceMap = d.currentPriceMap || {};
+  localRev = rrev; persistRev(); saveAll(true); executeDataMigration();
+  applyingRemote = false;
+  rerenderActive();
+  showToast('다른 기기의 변경사항이 반영되었습니다.');
+}
+function rerenderActive(){
+  const a = document.querySelector('.tab-btn.active'), name = a ? a.dataset.tab : 'dashboard';
+  if (name === 'stocks' && stockClassDirty) return;
+  const ae = document.activeElement;
+  if (name === 'rebalance' && ae && ae.tagName === 'INPUT' && document.getElementById('tab-rebalance').contains(ae)) { renderDashboard(); return; }
+  populateTradeStockSelect();
+  switchTab(name);
+}
+function startSync(){
+  try {
+    setSync('연결 중', 'var(--warn)');
+    onSnapshot(doc(db, 'portfolio', 'family_ledger'), snap => {
+      if (snap.metadata.hasPendingWrites) return;
+      if (!snap.exists()) {
+        if (hasLocalData()) { localRev = Date.now(); persistRev(); pushCloud(); } else setSync('실시간 연결', 'var(--profit)');
+        return;
+      }
+      const d = snap.data(), rrev = Number(d.rev) || (d.updatedAt ? Date.parse(d.updatedAt) : 0) || 0;
+      if (localRev === 0) {
+        applyingRemote = true; mergeRemote(d); executeDataMigration(); applyingRemote = false;
+        localRev = Date.now(); persistRev(); saveAll(true); pushCloud(); rerenderActive();
+      } else if (rrev > localRev) applyRemote(d, rrev);
+      else if (rrev < localRev) schedulePush();
+      else setSync('실시간 연결', 'var(--profit)');
+    }, err => { console.error(err); setSync('오프라인/권한 오류', 'var(--loss)'); });
+  } catch (e) { console.error(e); setSync('로컬 전용', 'var(--ink-dim)'); }
 }
 
 /* ---------------------------------------------------------
@@ -1943,6 +2244,7 @@ function executeDataMigration(){
 executeDataMigration();
 populateTradeStockSelect();
 renderDashboard();
+startSync();
 </script>
 </body>
 </html>
