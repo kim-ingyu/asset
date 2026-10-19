@@ -706,7 +706,7 @@ function saveAll(silent){
   localStorage.setItem(LS_ASSET_TARGETS, JSON.stringify(assetTargets));
   localStorage.setItem(LS_STOCKS, JSON.stringify(stocks));
   localStorage.setItem('fam_current_prices_v2_map', JSON.stringify(currentPriceMap));
-  if (!silent && !applyingRemote) { localRev = Date.now(); localStorage.setItem(LS_REV, String(localRev)); schedulePush(); }
+  if (!silent && !applyingRemote) { localRev = Math.max(Date.now(), localRev + 1); localStorage.setItem(LS_REV, String(localRev)); schedulePush(); }
 }
 
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
@@ -2230,23 +2230,14 @@ function buildPayload(){
 }
 function schedulePush(){ clearTimeout(pushTimer); pushTimer = setTimeout(pushCloud, 700); }
 async function pushCloud(){
+  if (!cloudReady) return;   // 클라우드 최신본을 받기 전에는 로컬 상태를 절대 업로드하지 않음
   try { setSync('동기화 중', 'var(--warn)'); await setDoc(doc(db, 'portfolio', 'family_ledger'), buildPayload()); setSync('실시간 연결', 'var(--profit)'); }
   catch (e) { console.error(e); setSync('오프라인 · 로컬 저장됨', 'var(--loss)'); }
 }
 function persistRev(){ localStorage.setItem(LS_REV, String(localRev)); }
 function hasLocalData(){ return trades.length || accounts.length || stocks.length || cashflows.length; }
-function unionBy(a, b, kf){ const m = new Map(); [...a, ...b].forEach(x => { const k = kf(x); if (!m.has(k)) m.set(k, x); }); return [...m.values()]; }
-function mergeRemote(d){   // 이 기기가 한 번도 동기화되지 않은 첫 연결: 양쪽 데이터를 합집합으로 보존
-  const arr = x => Array.isArray(x) ? x : [];
-  trades = unionBy(trades, arr(d.trades), t => t.id);
-  cashflows = unionBy(cashflows, arr(d.cashflows), c => c.id);
-  accounts = unionBy(accounts, arr(d.accounts), a => a.owner + '|' + a.type);
-  stocks = unionBy(stocks, arr(d.stocks), s => s.name);
-  assetTargets = { ...(d.assetTargets || {}), ...assetTargets };
-  currentPriceMap = { ...(d.currentPriceMap || {}), ...currentPriceMap };
-  prices = { ...(d.prices || {}), ...prices };
-}
-function applyRemote(d, rrev){
+let cloudReady = false;   // 이번 접속에서 서버 최신본을 한 번 받아 덮어썼는지
+function applyRemote(d, rrev, initial){
   const arr = x => Array.isArray(x) ? x : [];
   applyingRemote = true;
   accounts = arr(d.accounts); trades = arr(d.trades); stocks = arr(d.stocks); cashflows = arr(d.cashflows);
@@ -2254,7 +2245,7 @@ function applyRemote(d, rrev){
   localRev = rrev; persistRev(); saveAll(true); executeDataMigration();
   applyingRemote = false;
   rerenderActive();
-  showToast('다른 기기의 변경사항이 반영되었습니다.');
+  if (!initial) showToast('다른 기기의 변경사항이 반영되었습니다.');
 }
 function rerenderActive(){
   const a = document.querySelector('.tab-btn.active'), name = a ? a.dataset.tab : 'dashboard';
@@ -2266,19 +2257,23 @@ function rerenderActive(){
 }
 function startSync(){
   try {
-    setSync('연결 중', 'var(--warn)');
+    setSync('클라우드 최신본 불러오는 중', 'var(--warn)');
     onSnapshot(doc(db, 'portfolio', 'family_ledger'), snap => {
-      if (snap.metadata.hasPendingWrites) return;
-      if (!snap.exists()) {
-        if (hasLocalData()) { localRev = Date.now(); persistRev(); pushCloud(); } else setSync('실시간 연결', 'var(--profit)');
+      if (snap.metadata.hasPendingWrites) return;                 // 내 쓰기의 에코는 무시
+      if (!cloudReady && snap.metadata.fromCache) return;         // 최초에는 서버 확정본만 기준으로 삼음
+      if (!snap.exists()) {                                       // 클라우드가 비어 있을 때만 이 기기 데이터를 최초 시드로 업로드
+        cloudReady = true;
+        if (hasLocalData()) { localRev = Math.max(Date.now(), localRev + 1); persistRev(); pushCloud(); }
+        else setSync('실시간 연결', 'var(--profit)');
         return;
       }
       const d = snap.data(), rrev = Number(d.rev) || (d.updatedAt ? Date.parse(d.updatedAt) : 0) || 0;
-      if (localRev === 0) {
-        applyingRemote = true; mergeRemote(d); executeDataMigration(); applyingRemote = false;
-        localRev = Date.now(); persistRev(); saveAll(true); pushCloud(); rerenderActive();
-      } else if (rrev > localRev) applyRemote(d, rrev);
-      else if (rrev < localRev) schedulePush();
+      if (!cloudReady) {                                          // 최초 진입: 로컬 rev·내용과 무관하게 클라우드로 강제 덮어쓰기
+        cloudReady = true;
+        applyRemote(d, rrev, true);
+        setSync('실시간 연결', 'var(--profit)');
+      } else if (rrev > localRev) { applyRemote(d, rrev, false); setSync('실시간 연결', 'var(--profit)'); }  // 다른 기기의 최신 변경
+      else if (rrev < localRev) schedulePush();                   // 이 기기에서 방금 입력한 변경을 클라우드로
       else setSync('실시간 연결', 'var(--profit)');
     }, err => { console.error(err); setSync('오프라인/권한 오류', 'var(--loss)'); });
   } catch (e) { console.error(e); setSync('로컬 전용', 'var(--ink-dim)'); }
